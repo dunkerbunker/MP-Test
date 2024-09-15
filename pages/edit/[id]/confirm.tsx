@@ -1,14 +1,14 @@
-// pages/edit/[id]/confirm.tsx
 "use client";
 
 import { useEffect, useState } from "react";
 import { Container, Grid, Typography, Button, Box, Alert } from "@mui/material";
 import { useRouter } from "next/navigation";
 import axios from "axios";
-import { styled } from "@mui/system"; // Import styled for custom button
+import { styled } from "@mui/system";
 
 // Define the interface for Recommendation data
 interface Recommendation {
+  recno: number;
   bundle_price: number;
   data_volume: number;
   data_validity: number;
@@ -23,6 +23,7 @@ interface Recommendation {
   Ribbon_text: string | null;
   Giftpack: string;
   mageypackid: string;
+  day: number;
 }
 
 // User-friendly field names
@@ -41,6 +42,7 @@ const fieldTitles: { [key: string]: string } = {
   Ribbon_text: "Ribbon Text",
   Giftpack: "Gift Pack",
   mageypackid: "Magey Pack ID",
+  day: "Day",
 };
 
 export default function ConfirmChanges() {
@@ -51,13 +53,42 @@ export default function ConfirmChanges() {
     { key: string; oldValue: string | number; newValue: string | number; changed: boolean }[]
   >([]);
   const [showSuccessAlert, setShowSuccessAlert] = useState(false);
+  const [showFailureAlert, setShowFailureAlert] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [countdown, setCountdown] = useState(5);
+  const [startDate, setStartDate] = useState<string | null>(null);
+  const [endDate, setEndDate] = useState<string | null>(null);
   const primaryColor = process.env.NEXT_PUBLIC_PRIMARY_COLOR || "#ff0000";
   const secondaryColor = process.env.NEXT_PUBLIC_SECONDARY_COLOR || "#ffffff";
+
+
+    // Authentication check
+    useEffect(() => {
+      const checkSession = async () => {
+        try {
+          const response = await axios.get("/api/auth/check-session");
+          if (response.status !== 200) {
+            router.push("/login");
+          }
+        } catch (error) {
+          router.push("/login");
+        }
+      };
+  
+      checkSession();
+    }, [router]);
+
 
   useEffect(() => {
     const prevData = sessionStorage.getItem("previousData");
     const modData = sessionStorage.getItem("modifiedData");
+    const storedStartDate = sessionStorage.getItem("startDate");
+    const storedEndDate = sessionStorage.getItem("endDate");
+
+    if (storedStartDate && storedEndDate) {
+      setStartDate(storedStartDate);
+      setEndDate(storedEndDate);
+    }
 
     if (prevData && modData) {
       const prevParsed = JSON.parse(prevData);
@@ -102,13 +133,55 @@ export default function ConfirmChanges() {
 
   const handleConfirm = async () => {
     try {
-      // Submit modified data
-      await axios.post("/api/recommendations/update", modifiedData);
+      const storedStartDate = sessionStorage.getItem("startDate");
+      const storedEndDate = sessionStorage.getItem("endDate");
+
+      if (!storedStartDate || !storedEndDate) {
+        throw new Error("Start date or end date is missing.");
+      }
+
+      // Convert stored dates to numeric values (days)
+      const startDate = Number(storedStartDate);
+      const endDate = Number(storedEndDate);
+
+      // Step 1: Fetch all variants for the given recno (id)
+      const response = await axios.get(`/api/recommendations/${modifiedData?.recno}?getVariants=true&startDate=${startDate}&endDate=${endDate}`);
+      const variants = response.data;
+
+      // Step 2: Update each filtered variant
+      for (const variant of variants) {
+        const updatedData = {
+          ...modifiedData, // Assuming you're applying the same modifications for all variants
+          day: variant.day,
+          recno: variant.recno,
+        };
+
+        // Call the update API for each recno
+        await axios.put(`/api/recommendations/${variant.recno}`, updatedData);
+      }
 
       // Show success message and start countdown
       setShowSuccessAlert(true);
+      setShowFailureAlert(false); // Hide failure alert if shown
+
+      // Clear session storage
+      sessionStorage.removeItem("previousData");
+      sessionStorage.removeItem("modifiedData");
+      sessionStorage.removeItem("startDate");
+      sessionStorage.removeItem("endDate");
+
     } catch (error) {
       console.error("Error during confirmation:", error);
+
+      setShowSuccessAlert(false);
+      setShowFailureAlert(true); // Show failure alert
+
+      // Properly handle axios error
+      if (axios.isAxiosError(error)) {
+        setErrorMessage(error.response?.data?.message || "An error occurred while updating.");
+      } else {
+        setErrorMessage("An unknown error occurred.");
+      }
     }
   };
 
@@ -151,8 +224,22 @@ export default function ConfirmChanges() {
           </Typography>
 
           <Typography variant="h6" component="p" sx={{ marginBottom: "2rem" }}>
-            Changes will be made for $startdate to $enddate
+            Changes will be made for {startDate || "N/A"} to {endDate || "N/A"}
           </Typography>
+
+            {/* Success Alert */}
+        {showSuccessAlert && (
+          <Alert severity="success" sx={{ mt: 4 }}>
+            Success! Changes have been confirmed. You will be redirected to the homepage in {countdown} seconds.
+          </Alert>
+        )}
+
+        {/* Failure Alert */}
+        {showFailureAlert && (
+          <Alert severity="error" sx={{ mt: 4 }}>
+            {errorMessage}
+          </Alert>
+        )}
 
           {comparisonResults.length > 0 ? (
             <Grid container spacing={2}>
@@ -219,7 +306,7 @@ export default function ConfirmChanges() {
           )}
 
           <Grid container spacing={2} sx={{ mt: 4 }}>
-            <Grid item xs={12} sm={6}>
+            <Grid item xs={12} sm={6} mb={5}>
               <Button
                 variant="contained"
                 sx={{
@@ -268,12 +355,6 @@ export default function ConfirmChanges() {
       {/* Fixed X Button */}
       <XButton onClick={() => router.push("/")}>X</XButton>
 
-      {/* Success Alert */}
-      {showSuccessAlert && (
-        <Alert severity="success" sx={{ mt: 4 }}>
-          Success! Changes have been confirmed. You will be redirected to the homepage in {countdown} seconds.
-        </Alert>
-      )}
     </Container>
   );
 }

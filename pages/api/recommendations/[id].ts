@@ -47,26 +47,41 @@ export default async function handler(
 
   if (req.method === "GET") {
     try {
+      const startDate = req.query.startDate ? Number(req.query.startDate) : null;
+      const endDate = req.query.endDate ? Number(req.query.endDate) : null;
+  
       if (getVariants) {
         try {
           // Step 1: Fetch the mageypackid using the recid (id)
           const recommendation = await prisma.recommendation.findUnique({
-            where: { recno: Number(id) }, // Assuming `recid` is `recno`
-            select: { mageypackid: true }, // Only fetching the mageypackid
+            where: { recno: Number(id) }, 
+            select: { mageypackid: true }, 
           });
-
+  
           if (!recommendation || !recommendation.mageypackid) {
             return res
               .status(404)
               .json({ error: "No mageypackid found for the provided recid" });
           }
-
-          // Step 2: Get all variants (recommendations) for the mageypackid and sort by day
+  
+          // Step 2: Get all variants (recommendations) for the mageypackid, sorted by day
+          const whereCondition = {
+            mageypackid: recommendation.mageypackid,
+          };
+  
+          // If startDate and endDate are provided, add the filter for day
+          if (startDate && endDate) {
+            whereCondition['day'] = {
+              gte: startDate,
+              lte: endDate,
+            };
+          }
+  
           const variants = await prisma.recommendation.findMany({
-            where: { mageypackid: recommendation.mageypackid },
+            where: whereCondition,
             orderBy: { day: "asc" }, // Sorting by day
           });
-
+  
           if (variants.length > 0) {
             return res.status(200).json(variants);
           } else {

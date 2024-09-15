@@ -10,6 +10,7 @@ import {
 } from "@mui/material";
 import { styled } from "@mui/system";
 import RecommendationForm from "../components/RecommendationForm"; // Import the form component
+import axios from "axios";
 
 const primaryColor = process.env.NEXT_PUBLIC_PRIMARY_COLOR || "#ff0000";
 const secondaryColor = process.env.NEXT_PUBLIC_SECONDARY_COLOR || "#ffffff";
@@ -41,11 +42,24 @@ export default function CreatePage() {
   const [error, setError] = useState<string>("");
   const [showForm, setShowForm] = useState<boolean>(false); // State to manage form visibility
 
-  useEffect(() => {
-    // Load initial data if needed (optional)
-    setLoading(false);
-  }, []);
 
+  // Authentication check
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const response = await axios.get("/api/auth/check-session");
+        if (response.status !== 200) {
+          router.push("/login");
+        }
+      } catch (error) {
+        router.push("/login");
+      }
+    };
+
+    checkSession();
+    setLoading(false);
+  }, [router]);
+      
   const handleProceed = () => {
     // Show the form for creating a new recommendation
     setShowForm(true);

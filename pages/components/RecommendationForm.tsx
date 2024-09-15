@@ -113,7 +113,6 @@ export default function RecommendationForm({
     formState: { errors },
     setValue,
   } = useForm<Recommendation>({
-    // @ts-expect-error - The resolver expects a schema
     resolver: yupResolver(schema),
     mode: "onSubmit",
   });
@@ -219,15 +218,12 @@ export default function RecommendationForm({
   const [countdown, setCountdown] = useState(5);
   const [previousData, setPreviousData] = useState<Recommendation | null>(null);
 
-
   useEffect(() => {
     if (showSuccessMessage) {
-      // Start the countdown for redirect after success
       const intervalId = setInterval(() => {
         setCountdown((prev) => prev - 1);
       }, 1000);
 
-      // Redirect after countdown reaches 0
       if (countdown === 0) {
         router.push("/");
       }
@@ -237,7 +233,6 @@ export default function RecommendationForm({
   }, [showSuccessMessage, countdown, router]);
 
   useEffect(() => {
-    // Generate a range of validity days based on environment variables
     const validityDays = Array.from(
       { length: maxValidity - minValidity + 1 },
       (_, i) => i + minValidity,
@@ -276,7 +271,6 @@ export default function RecommendationForm({
           setIsLoading(false);
         });
     } else {
-      // Set default values when not in edit mode
       setValue("giftpack", "NO");
       setValue("package_Verbiage", null);
       setIsLoading(false);
@@ -286,63 +280,83 @@ export default function RecommendationForm({
   const handleDataUnitChange = (e: SelectChangeEvent) => {
     const selectedUnit = e.target.value as "MB" | "GB";
 
-    // Convert the current value appropriately
     if (selectedUnit === "GB") {
       setDataVolume((prevVolume) =>
         Math.min(prevVolume / 1024, maxDataVolumeGb),
-      ); // Convert MB to GB
+      );
     } else {
       setDataVolume((prevVolume) =>
         Math.min(prevVolume * 1024, maxDataVolumeMb),
-      ); // Convert GB to MB
+      );
     }
 
     setDataUnit(selectedUnit);
   };
 
-  // Handle form submission
   const onSubmit = async (data: Recommendation) => {
     try {
-      // Initialize prices
       let dataPrice = 0;
       let onnetPrice = 0;
       let localPrice = 0;
       let smsPrice = 0;
-  
-      // Determine how many allowances are used
-      let allowanceCount = 0;
-      if (data.data_volume > 0) allowanceCount++;
-      if (data.onnet_min > 0) allowanceCount++;
-      if (data.local_min > 0) allowanceCount++;
-      if (data.sms > 0) allowanceCount++;
-  
-      // Distribute the bundle price among the used allowances
-      if (allowanceCount > 0) {
-        const pricePerAllowance = data.bundle_price / allowanceCount;
-  
-        if (data.data_volume > 0) dataPrice = pricePerAllowance;
-        if (data.onnet_min > 0) onnetPrice = pricePerAllowance;
-        if (data.local_min > 0) localPrice = pricePerAllowance;
-        if (data.sms > 0) smsPrice = pricePerAllowance;
+      
+      let totalBundlePrice = data.bundle_price;
+      
+      // Check which allowances are present
+      const hasData = data.data_volume > 0;
+      const hasOnnet = data.onnet_min > 0;
+      const hasLocal = data.local_min > 0;
+      const hasSms = data.sms > 0;
+      
+      // Set a minimal price for each allowance if it exists
+      const minimalPrice = 1;
+      
+      // Deduct minimal prices for onnet, local, and sms if present
+      if (hasSms) {
+        smsPrice = minimalPrice;
+        totalBundlePrice -= minimalPrice;
       }
-  
+      
+      if (hasLocal) {
+        localPrice = minimalPrice;
+        totalBundlePrice -= minimalPrice;
+      }
+      
+      if (hasOnnet) {
+        onnetPrice = minimalPrice;
+        totalBundlePrice -= minimalPrice;
+      }
+      
+      // Now, assign the remaining price based on the hierarchy
+      if (hasData) {
+        dataPrice = totalBundlePrice;
+      } else if (hasOnnet) {
+        onnetPrice += totalBundlePrice;
+      } else if (hasLocal) {
+        localPrice += totalBundlePrice;
+      } else if (hasSms) {
+        smsPrice += totalBundlePrice;
+      }
+
+      console.log(data);
+
       if (!isEdit) {
-        // Generate the initial unique recno
         let uniqueRecno = await generateUniqueRecno();
         const tempRecno = uniqueRecno;
         const upperCasePackageName = data.package_name
-        .replace(/\s+/g, "_")
-        .replace(/[^a-zA-Z0-9_]/g, "")
-        .toUpperCase();
-      
+          .replace(/\s+/g, "_")
+          .replace(/[^a-zA-Z0-9_]/g, "")
+          .toUpperCase();
+
         let currentDay = 1;
-  
+        const tempDataVolume = dataUnit === "GB" ? data.data_volume * 1024 : data.data_volume;
+
         while (currentDay <= 31) {
           const formData = {
             recno: uniqueRecno,
             day: currentDay,
-            bundle_price: data.bundle_price.toFixed(2),
-            data_volume: data.data_volume,
+            bundle_price: data.bundle_price,
+            data_volume: tempDataVolume,
             data_validity: data.data_validity,
             data_price: dataPrice,
             onnet_min: data.onnet_min,
@@ -355,25 +369,26 @@ export default function RecommendationForm({
             sms_validity: data.sms_validity,
             sms_price: smsPrice,
             package_name: data.package_name,
-            package_Verbiage: data.package_Verbiage,
+            package_Verbage: data.package_Verbiage,
             Short_Desc: data.Short_Desc,
             Ribbon_text: data.Ribbon_text ?? null,
             Giftpack: "NO",
-            mageypackid: `${tempRecno}_${upperCasePackageName }`, // Use unique recno for new entries
+            mageypackid: `${tempRecno}_${upperCasePackageName}`,
           };
-  
+
           await axios.post("/api/recommendations", formData);
-  
           uniqueRecno += 1;
           currentDay += 1;
         }
         setShowSuccessMessage(true);
       } else if (isEdit && previousData) {
+        const tempDataVolume = dataUnit === "GB" ? data.data_volume * 1024 : data.data_volume;
+
         const formData = {
-          recno: id, // Use the id from URL param for edit
-          day: startDate, // Use startDate as day
-          bundle_price: data.bundle_price.toFixed(2),
-          data_volume: data.data_volume,
+          recno: id,
+          day: startDate,
+          bundle_price: data.bundle_price,
+          data_volume: tempDataVolume,
           data_validity: data.data_validity,
           data_price: dataPrice,
           onnet_min: data.onnet_min,
@@ -386,33 +401,28 @@ export default function RecommendationForm({
           sms_validity: data.sms_validity,
           sms_price: smsPrice,
           package_name: data.package_name,
-          package_Verbiage: data.package_Verbiage,
+          package_Verbage: data.package_Verbiage,
           Short_Desc: data.Short_Desc,
-          Ribbon_text: data.Ribbon_text ?? null, // Ensure nullability is handled
-          Giftpack: "NO", // Static value 'NO'
-          mageypackid: previousData.mageypackid, // Use existing pack ID when editing
+          Ribbon_text: data.Ribbon_text ?? null,
+          Giftpack: "NO",
+          mageypackid: previousData.mageypackid,
         };
-  
-        // Store data in sessionStorage
+
         sessionStorage.setItem('previousData', JSON.stringify(previousData));
         sessionStorage.setItem('modifiedData', JSON.stringify(formData));
         sessionStorage.setItem('startDate', startDate || '');
         sessionStorage.setItem('endDate', endDate || '');
-  
-        // Redirect to confirmation page
+
         router.push(`/edit/${id}/confirm`);
       }
     } catch (error) {
       console.error("Submission process encountered an error:", error);
     }
   };
-  
 
   const generateUniqueRecno = async () => {
     try {
-      // Call /recno endpoint to get the highest recno
       const response = await axios.get("/api/recno");
-      // Return the recno, incremented by 1 to ensure it's unique
       return response.data.recno;
     } catch (error) {
       console.error("Error fetching recno:", error);
@@ -435,8 +445,7 @@ export default function RecommendationForm({
         <>
           {showSuccessMessage && (
             <Alert severity="success" sx={{ mb: 4 }}>
-              Form submitted successfully! Redirecting to homepage in{" "}
-              {countdown} seconds...
+              Form submitted successfully! Redirecting to homepage in {countdown} seconds...
             </Alert>
           )}
           <Typography
@@ -452,17 +461,11 @@ export default function RecommendationForm({
               marginTop: "3rem",
             }}
           >
-            {isEdit
-              ? `Currently Editing ${packageName}`
-              : "Create Recommendation"}
+            {isEdit ? `Currently Editing ${packageName}` : "Create Recommendation"}
           </Typography>
 
           {startDate && endDate && (
-            <Typography
-              sx={{
-                mb: 5,
-              }}
-            >
+            <Typography sx={{ mb: 5 }}>
               Modifying the dates from {startDate} to {endDate}
             </Typography>
           )}
@@ -477,7 +480,10 @@ export default function RecommendationForm({
                   min={minBundlePrice}
                   max={maxBundlePrice}
                   step={bundlePriceStep}
-                  onChange={(e, newValue) => setBundlePrice(newValue as number)}
+                  onChange={(e, newValue) => {
+                    setBundlePrice(newValue as number);
+                    setValue('bundle_price', newValue as number); // Sync form state
+                  }}
                   valueLabelDisplay="auto"
                   sx={{
                     color: primaryColor,
@@ -492,7 +498,10 @@ export default function RecommendationForm({
                 <TextField
                   {...register("bundle_price")}
                   value={bundlePrice}
-                  onChange={(e) => setBundlePrice(Number(e.target.value))}
+                  onChange={(e) => {
+                    setBundlePrice(Number(e.target.value));
+                    setValue('bundle_price', Number(e.target.value)); // Sync form state
+                  }}
                   label="Bundle Price"
                   error={!!errors.bundle_price}
                   helperText={errors.bundle_price?.message}
@@ -516,7 +525,10 @@ export default function RecommendationForm({
                   min={dataUnit === "MB" ? minDataVolumeMb : minDataVolumeGb}
                   max={dataUnit === "MB" ? maxDataVolumeMb : maxDataVolumeGb}
                   step={dataUnit === "MB" ? dataVolumeStepMb : dataVolumeStepGb}
-                  onChange={(e, newValue) => setDataVolume(newValue as number)}
+                  onChange={(e, newValue) => {
+                    setDataVolume(newValue as number);
+                    setValue('data_volume', newValue as number); // Sync form state
+                  }}
                   valueLabelDisplay="auto"
                   sx={{
                     color: primaryColor,
@@ -533,7 +545,10 @@ export default function RecommendationForm({
                     <TextField
                       {...register("data_volume")}
                       value={dataVolume}
-                      onChange={(e) => setDataVolume(Number(e.target.value))}
+                      onChange={(e) => {
+                        setDataVolume(Number(e.target.value));
+                        setValue('data_volume', Number(e.target.value)); // Sync form state
+                      }}
                       label="Data Volume"
                       error={!!errors.data_volume}
                       helperText={errors.data_volume?.message}
@@ -570,9 +585,10 @@ export default function RecommendationForm({
                       options={validityOptions}
                       getOptionLabel={(option) => option.toString()}
                       defaultValue={dataValidity || minValidity}
-                      onChange={(event, newValue) =>
-                        setValue("data_validity", newValue ?? minValidity)
-                      }
+                      onChange={(event, newValue) => {
+                        setDataValidity(newValue ?? minValidity);
+                        setValue('data_validity', newValue ?? minValidity); // Sync form state
+                      }}
                       renderInput={(params) => (
                         <TextField
                           {...params}
@@ -585,7 +601,7 @@ export default function RecommendationForm({
                           InputProps={{
                             ...params.InputProps,
                             sx: {
-                              borderRadius: "30px", // Adjust the border radius to make it rounded
+                              borderRadius: "30px",
                             },
                           }}
                         />
@@ -606,7 +622,10 @@ export default function RecommendationForm({
                   min={minOnnetMin}
                   max={maxOnnetMin}
                   step={onnetMinStep}
-                  onChange={(e, newValue) => setOnnetMin(newValue as number)}
+                  onChange={(e, newValue) => {
+                    setOnnetMin(newValue as number);
+                    setValue('onnet_min', newValue as number); // Sync form state
+                  }}
                   valueLabelDisplay="auto"
                   sx={{
                     color: primaryColor,
@@ -623,7 +642,10 @@ export default function RecommendationForm({
                     <TextField
                       {...register("onnet_min")}
                       value={onnetMin}
-                      onChange={(e) => setOnnetMin(Number(e.target.value))}
+                      onChange={(e) => {
+                        setOnnetMin(Number(e.target.value));
+                        setValue('onnet_min', Number(e.target.value)); // Sync form state
+                      }}
                       label="On-net Minutes"
                       error={!!errors.onnet_min}
                       helperText={errors.onnet_min?.message}
@@ -643,9 +665,10 @@ export default function RecommendationForm({
                       options={validityOptions}
                       getOptionLabel={(option) => option.toString()}
                       defaultValue={onnetValidity || minValidity}
-                      onChange={(event, newValue) =>
-                        setValue("onnet_validity", newValue ?? minValidity)
-                      }
+                      onChange={(event, newValue) => {
+                        setOnnetValidity(newValue ?? minValidity);
+                        setValue('onnet_validity', newValue ?? minValidity); // Sync form state
+                      }}
                       renderInput={(params) => (
                         <TextField
                           {...params}
@@ -658,7 +681,7 @@ export default function RecommendationForm({
                           InputProps={{
                             ...params.InputProps,
                             sx: {
-                              borderRadius: "30px", // Adjust the border radius to make it rounded
+                              borderRadius: "30px",
                             },
                           }}
                         />
@@ -679,7 +702,10 @@ export default function RecommendationForm({
                   min={minLocalMin}
                   max={maxLocalMin}
                   step={localMinStep}
-                  onChange={(e, newValue) => setLocalMin(newValue as number)}
+                  onChange={(e, newValue) => {
+                    setLocalMin(newValue as number);
+                    setValue('local_min', newValue as number); // Sync form state
+                  }}
                   valueLabelDisplay="auto"
                   sx={{
                     color: primaryColor,
@@ -696,7 +722,10 @@ export default function RecommendationForm({
                     <TextField
                       {...register("local_min")}
                       value={localMin}
-                      onChange={(e) => setLocalMin(Number(e.target.value))}
+                      onChange={(e) => {
+                        setLocalMin(Number(e.target.value));
+                        setValue('local_min', Number(e.target.value)); // Sync form state
+                      }}
                       label="Local Minutes"
                       error={!!errors.local_min}
                       helperText={errors.local_min?.message}
@@ -716,9 +745,10 @@ export default function RecommendationForm({
                       options={validityOptions}
                       getOptionLabel={(option) => option.toString()}
                       defaultValue={localValidity || minValidity}
-                      onChange={(event, newValue) =>
-                        setValue("local_validity", newValue ?? minValidity)
-                      }
+                      onChange={(event, newValue) => {
+                        setLocalValidity(newValue ?? minValidity);
+                        setValue('local_validity', newValue ?? minValidity); // Sync form state
+                      }}
                       renderInput={(params) => (
                         <TextField
                           {...params}
@@ -731,7 +761,7 @@ export default function RecommendationForm({
                           InputProps={{
                             ...params.InputProps,
                             sx: {
-                              borderRadius: "30px", // Adjust the border radius to make it rounded
+                              borderRadius: "30px",
                             },
                           }}
                         />
@@ -752,7 +782,10 @@ export default function RecommendationForm({
                   min={minSms}
                   max={maxSms}
                   step={smsStep}
-                  onChange={(e, newValue) => setSms(newValue as number)}
+                  onChange={(e, newValue) => {
+                    setSms(newValue as number);
+                    setValue('sms', newValue as number); // Sync form state
+                  }}
                   valueLabelDisplay="auto"
                   sx={{
                     color: primaryColor,
@@ -769,7 +802,10 @@ export default function RecommendationForm({
                     <TextField
                       {...register("sms")}
                       value={sms}
-                      onChange={(e) => setSms(Number(e.target.value))}
+                      onChange={(e) => {
+                        setSms(Number(e.target.value));
+                        setValue('sms', Number(e.target.value)); // Sync form state
+                      }}
                       label="SMS Count"
                       error={!!errors.sms}
                       helperText={errors.sms?.message}
@@ -789,9 +825,10 @@ export default function RecommendationForm({
                       options={validityOptions}
                       getOptionLabel={(option) => option.toString()}
                       value={smsValidity ?? minValidity}
-                      onChange={(event, newValue) =>
-                        setValue("sms_validity", newValue ?? minValidity)
-                      }
+                      onChange={(event, newValue) => {
+                        setSmsValidity(newValue ?? minValidity);
+                        setValue('sms_validity', newValue ?? minValidity); // Sync form state
+                      }}
                       renderInput={(params) => (
                         <TextField
                           {...params}
@@ -804,7 +841,7 @@ export default function RecommendationForm({
                           InputProps={{
                             ...params.InputProps,
                             sx: {
-                              borderRadius: "30px", // Adjust the border radius to make it rounded
+                              borderRadius: "30px",
                             },
                           }}
                         />
@@ -862,7 +899,10 @@ export default function RecommendationForm({
                   <Select
                     {...register("Ribbon_text")}
                     value={ribbonText}
-                    onChange={(e) => setRibbonText(e.target.value)}
+                    onChange={(e) => {
+                      setRibbonText(e.target.value);
+                      setValue('Ribbon_text', e.target.value); // Sync form state
+                    }}
                     sx={{
                       borderRadius: "50px",
                       "& .MuiSelect-select": {
